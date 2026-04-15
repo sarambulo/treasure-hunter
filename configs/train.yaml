@@ -1,0 +1,10 @@
+train_episodes: 200
+record_every: 100
+max_episode_steps: 300
+policy_lr: 0.0003
+policy_lr_decay: 0.995
+critic_lr: 0.0003
+critic_lr_decay: 0.995
+acum_gradients: 1
+scheduler_step: 1
+discount_factor: 0.95
