@@ -1,6 +1,6 @@
 import gymnasium as gym
 from .gym_api import GridEnv
-from .layout import Layout
+from .layout import *
 
 # Register the environment so we can create it with gym.make()
 gym.register(
