@@ -1,8 +1,42 @@
 import pytest
-from train import get_returns
+from train import get_n_step_returns
 import torch
 
 def test_returns():
-    rewards = [1, 2, 3]
-    returns = get_returns(rewards, discount_factor=1)
-    assert (returns == torch.tensor([6, 5, 3]).float()).all()
+    rewards = torch.tensor([1, 2, 3]).reshape(-1, 1).float()
+    values = torch.tensor([0, 0, 0, 0]).reshape(-1, 1).float()
+    terminated = torch.tensor([[False, False, True]]).reshape(-1, 1).bool()
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=1, n=1)
+    expected_returns = torch.tensor([1, 2, 3]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=1, n=2)
+    expected_returns = torch.tensor([3, 5, 3]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=1, n=3)
+    expected_returns = torch.tensor([6, 5, 3]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=0.9, n=2)
+    expected_returns = torch.tensor([2.8, 4.7, 3]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=0.9, n=3)
+    expected_returns = torch.tensor([5.23, 4.7, 3]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    # =================================================================
+    rewards = torch.tensor([1, 2, 3]).reshape(-1, 1).float()
+    values = torch.tensor([4, 3, 2, 1]).reshape(-1, 1).float()
+    terminated = torch.tensor([[False, False, True]]).reshape(-1, 1).bool()
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=1, n=2)
+    expected_returns = torch.tensor([5, 5, 3]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    rewards = torch.tensor([1, 2, 3]).reshape(-1, 1).float()
+    values = torch.tensor([4, 3, 2, 1]).reshape(-1, 1).float()
+    terminated = torch.tensor([[False, False, False]]).reshape(-1, 1).bool()
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=1, n=2)
+    expected_returns = torch.tensor([5, 6, 4]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)
+    rewards = torch.tensor([1, 2, 3]).reshape(-1, 1).float()
+    values = torch.tensor([4, 3, 2, 1]).reshape(-1, 1).float()
+    terminated = torch.tensor([[False, False, False]]).reshape(-1, 1).bool()
+    returns = get_n_step_returns(rewards, values, terminated, discount_factor=0.9, n=2)
+    expected_returns = torch.tensor([1+2*0.9+2*0.9**2, 2+3*0.9+1*0.9**2, 3+1*0.9]).reshape(-1, 1).float()
+    assert (returns).allclose(expected_returns)

@@ -1,5 +1,10 @@
 from aim_fsm import *
-from environment import EmptyRoom
+from environment import EmptyRoom, GridEnv
+from agent import DRLAgent
+from aim_fsm.particle import ArucoCombinedSensorModel
+import torch
+
+AGENT_CHECKPOINT_PATH = "checkpoints/best.pt"
 
 class Explore(StateMachineProgram):
     def __init__(self):
@@ -8,9 +13,136 @@ class Explore(StateMachineProgram):
                 robot.world_map.objects[object.wall_spec.label] = object
         for i, (name, pose) in enumerate(EmptyRoom.landmarks.items()):
             landmark_object = ArucoMarkerObj(
-                {'name': name, 'id': i, 'marker': None,},
+                {'name': f'{name}.a', 'id': i + 1, 'marker': None,},
                 x=pose.x, y=pose.y, z=pose.z, theta=pose.theta,
                 is_fixed=True
             )
             robot.world_map.objects[name] = landmark_object
+        self.env = GridEnv(EmptyRoom, render_mode="rgb_array")
+        self.agent = DRLAgent(self.env.action_space, device = "cpu")
+        checkpoint = torch.load(AGENT_CHECKPOINT_PATH, weights_only=False)
+        self.agent.policy.load_state_dict(checkpoint['policy_state_dict'])
+        particle_filter = ParticleFilter(robot,
+            num_particles=500, landmarks=EmptyRoom.landmarks,
+            sensor_model = ArucoCombinedSensorModel,
+            initializer= MyInitializer(x=400, y=400, radius=100),
+            randomizer=MyInitializer(x=400, y=400, radius=100)
+        )  
+        super().__init__(
+            particle_filter=particle_filter, launch_particle_viewer = True,
+            wall_marker_dict = None, speech=False
+        )       
+
+    $setup{
+        StateNode() =TM=> Localize() =C=> sense
+        sense: Sense()
+        sense =D=> Plan() =D=> Act() =C=> Localize() =C=> sense
+        sense =S=> Say("Found a new barrel!") =C=> sense
+        sense =C=> Say("Finished searching for barrels") =C=> ParentCompletes()
+    }
+
+class Localize(StateNode):
+    def start(self, event=None):
+        super().start(event)
+        # self.robot.particle_filter.move()
+        x = self.robot.pose.x
+        y = self.robot.pose.y
+        orientation = self.robot.pose.theta
+        try:
+            self.parent.env.set_robot_position(x, y, orientation)
+        except Exception as e:
+            print(f"Error setting robot position: {e}")
+        self.post_completion()
+
+class Sense(StateNode):
+    def __init__(self):
+        self.barrel_count = 0
         super().__init__()
+
+    def start(self, event=None):
+        super().start(event)
+        # Virtual environment
+        obs = self.parent.env._get_observation()
+        frame = self.parent.env.render()
+        imshow("environment", frame)
+        unseen_channel = self.parent.env.UNSEEN_CHANNEL
+        finished_threshold = 0.8
+        # Real world
+        new_barrel_count = self.count_barrels()
+        if new_barrel_count > self.barrel_count:
+            self.barrel_count = new_barrel_count
+            self.post_success()
+        elif 1 - obs[unseen_channel].sum() / obs[unseen_channel].size > finished_threshold:
+            self.post_completion()
+        else:
+            self.post_data(obs)
+
+    def count_barrels(self):
+        barrels = [
+            obj
+            for obj in self.robot.world_map.objects.values()
+            if isinstance(obj, BarrelObj)
+        ]
+        return len(barrels)
+
+class Plan(StateNode):
+    def start(self, event=None):
+        super().start(event)
+        if isinstance(event, DataEvent):
+            obs = event.data
+            action = self.parent.agent.act(obs)
+            self.post_data(action)
+
+def angle_to(orientation: float, current_angle: float) -> float:
+    turn_angle = (orientation - current_angle) % 360 # Modulo to ensure it's between 0 and 360
+    turn_angle = turn_angle if turn_angle <= 180 else turn_angle - 360 # Convert to [-180, 180]
+    return turn_angle
+
+class Act(StateNode):
+    $setup{
+        self.CustomTurn() =C=> self.CustomForward() =C=> StateNode() =T(1.5)=> ParentCompletes()
+    }
+
+    def start(self, event=None):
+        if isinstance(event, DataEvent):
+            action = event.data
+            # Act on the internal environment
+            self.parent.env.step(action)
+            # Act on the real world
+            desired_orientation = self.parent.env.actions[action]["orientation"]
+            current_angle_degrees = self.robot.pose.theta / math.pi * 180
+            self.turn_angle = angle_to(desired_orientation, current_angle_degrees)
+            self.move_distance = self.parent.env.world.cell_size
+            print(f"Action: {self.parent.env.actions[action]['label']}")
+            super().start(event)
+
+    class CustomTurn(Turn):
+        def start(self, event=None):
+            self.angle_deg = self.parent.turn_angle
+            super().start(event)
+
+    class CustomForward(Forward):
+        def start(self, event=None):
+            self.distance_mm = self.parent.move_distance
+            super().start(event)
+
+
+class MyInitializer(ParticleInitializer):
+    """ Normally distribute particles within a radius, with random heading. """
+    def __init__(self, x, y, radius=200):
+        super().__init__()
+        self.x = x
+        self.y = y
+        self.radius = radius
+
+    def initialize(self, robot):
+        for p in self.pf.particles:  #pf.particles - list of particles
+            qangle = random.random()*2*pi
+            r = random.gauss(0, self.radius/2) + self.radius/1.5
+            p.x = r * cos(qangle) + self.x
+            p.y = r * sin(qangle) + self.y
+            p.theta = random.random()*2*pi
+            p.log_weight = 0.0
+            p.weight = 1.0
+        self.pf.pose = PoseEstimate(self.x, self.y, 0, 0)
+        self.pf.motion_model.old_pose = robot.pose

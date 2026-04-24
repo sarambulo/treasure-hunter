@@ -11,7 +11,7 @@ class Policy(nn.Module):
         **kwargs
     ):
         super().__init__()
-        self.state_encoder = StateEncoder(**kwargs)
+        self.state_encoder = ResNet18(in_channels=5, **kwargs)
         self.classification_head = nn.Sequential(
             nn.Linear(512, 256),
             nn.ReLU(),
@@ -23,11 +23,10 @@ class Policy(nn.Module):
         self.device = torch.device(device)
         self.to(device)
 
-    def forward(self, grid, orientation):
+    def forward(self, obs):
         # Move inputs to device
-        grid = grid.to(self.device)
-        orientation = orientation.to(self.device)
-        state_features = self.state_encoder(grid, orientation)
+        obs = obs.to(self.device)
+        state_features = self.state_encoder(obs)
         x = self.classification_head(state_features)  # (N, 512) -> (N, num_classes)
         return x
     
@@ -38,7 +37,7 @@ class Critic(nn.Module):
         **kwargs
     ):
         super().__init__()
-        self.state_encoder = StateEncoder(**kwargs)
+        self.state_encoder = ResNet18(in_channels=5, **kwargs)
         self.regression_head = nn.Sequential(
             nn.Linear(512, 256),
             nn.ReLU(),
@@ -50,11 +49,10 @@ class Critic(nn.Module):
         self.device = torch.device(device)
         self.to(device)
 
-    def forward(self, grid, orientation):
+    def forward(self, obs):
         # Move inputs to device
-        grid = grid.to(self.device)
-        orientation = orientation.to(self.device)
-        state_features = self.state_encoder(grid, orientation)
+        obs = obs.to(self.device)
+        state_features = self.state_encoder(obs)
         x = self.regression_head(state_features)  # (N, 512) -> (N, num_classes)
         return x
 
@@ -95,6 +93,34 @@ class FusionModule(nn.Module):
     def forward(self, grid_encoding, orientation_embedding):
         x = torch.concat([grid_encoding, orientation_embedding], dim=-1)
         y = self.fusion_layers(x)
+        return y
+
+class ResNet8(nn.Module):
+    def __init__(self, in_channels: int = 3):
+        super().__init__()
+        # Set network hyperparameters
+        self.block_kernel_size = [3, 3, 3]
+        self.block_in_channels = [64, 128, 256]
+        self.block_out_channels = [128, 256, 512]
+        self.block_stride = [2, 2, 2]
+        # Initialize network
+        self.network = nn.Sequential(
+            nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=7, stride=2, padding=3),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+        )
+        block_params = zip(
+            self.block_in_channels,
+            self.block_out_channels,
+            self.block_kernel_size,
+            self.block_stride,
+        )
+        for in_channels, out_channels, kernel_size, stride in block_params:
+            self.network.append(ResNetBlock(in_channels, out_channels, kernel_size, stride))
+        self.network.append(nn.AdaptiveAvgPool2d(output_size=1))  # (N, 512, 3, 4) -> (N, 512, 1, 1)
+        self.network.append(nn.Flatten())  # (N, 512)
+
+    def forward(self, x):
+        y = self.network(x)  # (N, 512)
         return y
 
 

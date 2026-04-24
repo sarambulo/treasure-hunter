@@ -1,16 +1,15 @@
-environment: "GridEnv"
-train_episodes: 10000
+environment: "CartPole-v1"
+train_episodes: 100
 max_episode_steps: 500
 
 record_every: 1000
 checkpoint_step: 1000
 
-discount_factor: 0.95
-n_step: -1
+discount_factor: 0.99
 
 policy_lr: 0.0003
 policy_lr_decay: 1
 critic_lr: 0.0003
 critic_lr_decay: 1
 scheduler_step: 20
-acum_gradients: 2
+acum_gradients: 3
