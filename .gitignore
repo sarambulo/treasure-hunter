@@ -3,6 +3,7 @@ wandb/
 runs/
 *.png
 checkpoints/
+*.pdf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
