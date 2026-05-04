@@ -1,0 +1,9 @@
+torch
+gymnasium
+PyYAML
+numpy
+tqdm
+python-dotenv
+wandb
+matplotlib
+pytest
